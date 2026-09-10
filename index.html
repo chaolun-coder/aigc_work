@@ -112,7 +112,10 @@ body{
   transition:background-color var(--dur) var(--ease), color var(--dur) var(--ease);
   overflow-x:hidden;
 }
-body.is-locked{overflow:hidden;overscroll-behavior:none}
+body.is-locked{overscroll-behavior:none}
+body.is-locked::before{animation-play-state:paused}
+body.is-locked .hero-card::after{animation-play-state:paused}
+body.is-locked .gen-badge{animation-play-state:paused}
 img,svg{display:block;max-width:100%}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 a{color:inherit;text-decoration:none}
@@ -309,7 +312,7 @@ section{padding:clamp(56px,9vw,104px) 0}
 .hero-card::after{z-index:2}
 .gen-badge{
   position:absolute;left:14px;top:14px;z-index:3;
-  background:rgba(20,14,46,.55);color:#F3EDFF;backdrop-filter:blur(8px);
+  background:rgba(20,14,46,.78);color:#F3EDFF;
   border:1px solid rgba(243,237,255,.25);border-radius:999px;padding:6px 13px;
   font-size:.72rem;font-weight:700;letter-spacing:.1em;font-family:var(--font-mono);
 }
@@ -544,10 +547,10 @@ section{padding:clamp(56px,9vw,104px) 0}
 /* ============================================================
    11. Modal
    ============================================================ */
-.modal{position:fixed;inset:0;z-index:120;display:none}
+.modal{position:fixed;inset:0;z-index:120;opacity:0;visibility:hidden;transition:opacity .22s var(--ease),visibility .22s var(--ease)}
 .modal[hidden]{display:none !important}
-.modal.is-open{display:block}
-.modal-backdrop{position:absolute;inset:0;background:rgba(22,12,48,.6);backdrop-filter:blur(6px);animation:fadeIn .3s var(--ease) both}
+.modal.is-open{opacity:1;visibility:visible}
+.modal-backdrop{position:absolute;inset:0;background:rgba(22,12,48,.82);animation:fadeIn .22s var(--ease) both}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 .modal-panel{
   position:relative;max-width:820px;margin:0 auto;height:100%;overflow-y:auto;overscroll-behavior:contain;
@@ -590,9 +593,9 @@ section{padding:clamp(56px,9vw,104px) 0}
   @media (prefers-reduced-motion:reduce){.douyin-cta{transition:none}}
 
   /* 独立视频模态（Hero Showreel / 点击播放） */
-  .video-modal{position:fixed;inset:0;z-index:200;display:none}
-  .video-modal.is-open{display:block}
-  .video-modal-backdrop{position:absolute;inset:0;background:rgba(10,7,20,.86);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);animation:fadeIn .3s var(--ease) both}
+  .video-modal{position:fixed;inset:0;z-index:200;opacity:0;visibility:hidden;transition:opacity .22s var(--ease),visibility .22s var(--ease)}
+  .video-modal.is-open{opacity:1;visibility:visible}
+  .video-modal-backdrop{position:absolute;inset:0;background:rgba(10,7,20,.92);animation:fadeIn .22s var(--ease) both}
   .video-modal-panel{position:relative;max-width:960px;margin:0 auto;min-height:100%;display:flex;flex-direction:column;justify-content:center;padding:24px calc(24px + env(safe-area-inset-right,0px)) calc(24px + env(safe-area-inset-bottom,0px)) calc(24px + env(safe-area-inset-left,0px));overscroll-behavior:contain}
   .video-modal-close{position:absolute;top:calc(18px + env(safe-area-inset-top,0px));right:calc(18px + env(safe-area-inset-right,0px));z-index:5;width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.12);color:#fff;font-size:1.25rem;line-height:1;cursor:pointer;display:grid;place-items:center;transition:background .2s var(--ease)}
   .video-modal-close:hover,.video-modal-close:focus-visible{background:rgba(255,255,255,.24)}
@@ -1256,7 +1259,8 @@ section{padding:clamp(56px,9vw,104px) 0}
                 '<span class="douyin-cta">' + douyinGlyph + '在抖音观看</span>' +
               '</a>';
     } else {
-      inner = '<video controls ' + ((m.poster || p.cover) ? 'poster="' + esc(m.poster || p.cover) + '" ' : '') + 'preload="metadata" aria-label="' + esc(p.title) + ' 视频"><source src="' + esc(m.src) + '" type="video/mp4">您的浏览器暂不支持视频播放。</video>';
+      // playsinline：iOS 不强制全屏；不设 autoplay，用户点播放控件才出声
+      inner = '<video controls playsinline ' + ((m.poster || p.cover) ? 'poster="' + esc(m.poster || p.cover) + '" ' : '') + 'preload="metadata" aria-label="' + esc(p.title) + ' 视频"><source src="' + esc(m.src) + '" type="video/mp4">您的浏览器暂不支持视频播放。</video>';
     }
     return '<div class="modal-media">' + inner + '</div>' + (m.caption ? '<p class="modal-cap">' + esc(m.caption) + '</p>' : '');
   }
@@ -1400,12 +1404,16 @@ section{padding:clamp(56px,9vw,104px) 0}
     // 路由切换时，若有弹窗在显示，先关闭它（停止声音、回到列表视图）
     if (modal && modal.classList.contains('is-open')) { closeModal(); }
     if (videoModal && videoModal.classList.contains('is-open')) { closeVideoModal(); }
+    // 切页同步停掉封面视频：避免切换瞬间旧视图里的视频继续出声
+    pauseAllCoverVideos();
     currentRoute = route;
     $$('.view').forEach(function(v){ v.classList.toggle('is-active', v.id === 'view-' + route); });
     $$('[data-route]').forEach(function(a){ a.classList.toggle('is-active', a.getAttribute('data-route') === route); });
 
     if (route === 'about') { fillBars(); }
     observeReveals();
+    // 切回列表类视图时，恢复可见且切换前确实在播的封面视频
+    resumeCoverVideos();
     document.title = ({
       home: '晁伦 · AIGC 设计师',
       work: '作品 · 晁伦',
@@ -1457,6 +1465,13 @@ section{padding:clamp(56px,9vw,104px) 0}
   function onFilter(e){
     var btn = e.target.closest('.filter');
     if (!btn) { return; }
+    // 切栏位前同步停掉所有封面视频：仅靠 is-hidden(display:none) 触发的
+    // IntersectionObserver 回调是异步的，切换瞬间背景视频仍会继续出声。
+    pauseAllCoverVideos();
+    // 切栏位前若弹窗还开着(含其中可能正在播放、带声的视频)，先关掉它，
+    // 避免"切换分类时背景视频仍出声 / 详情卡在播放中"的体验问题。
+    if (modal && modal.classList.contains('is-open')) { closeModal(); }
+    if (videoModal && videoModal.classList.contains('is-open')) { closeVideoModal(); }
     var f = btn.getAttribute('data-filter');
     $$('#filters .filter').forEach(function(b){ b.classList.toggle('is-active', b === btn); });
     var shown = 0;
@@ -1466,6 +1481,8 @@ section{padding:clamp(56px,9vw,104px) 0}
       if (ok) { shown++; }
     });
     $('#emptyState').hidden = shown > 0;
+    // 恢复筛选后仍可见、且切换前确实在播的封面视频（保持预览体验）
+    resumeCoverVideos();
   }
 
   /* ============================================================
@@ -1482,12 +1499,17 @@ section{padding:clamp(56px,9vw,104px) 0}
     var idx = -1;
     for (var i = 0; i < PROJECTS.length; i++) { if (PROJECTS[i].id === id) { idx = i; break; } }
     if (idx < 0) { return; }
+    // 打开详情前同步停掉背景封面视频：手机端它们正在视口内自动播放，
+    // 不停就会出现「还没点播放，视频声音已经响」的问题。
+    pauseAllCoverVideos();
     modalIndex = idx;
     var wasOpen = modal.classList.contains('is-open'); // 记录进入前是否已在打开(用于 stepModal 不重复压栈)
     var p = PROJECTS[idx];
 
     var hasMedia = !!(p.media && p.media.src);
     $('#modalCover').classList.toggle('has-media', hasMedia);
+    // 切换作品(上一个/下一个)时必须先停掉旧媒体，否则旧视频声音会残留在后台
+    stopMediaIn($('#modalCover'));
     $('#modalCover').innerHTML = hasMedia ? modalMedia(p) : coverOrImg(p);
     if (hasMedia && mediaType(p.media.src) === 'file') {
       var v = $('#modalCover').querySelector('video');
@@ -1532,6 +1554,7 @@ section{padding:clamp(56px,9vw,104px) 0}
     modal.hidden = false;
     modal.classList.add('is-open');
     document.body.classList.add('is-locked');
+    lockScroll();
     $('#modalClose').focus();
     // 把详情压入浏览器历史栈：移动端(iOS/安卓)的左滑/右滑返回手势依赖
     // 历史记录，压栈后滑动手势才能识别到"上一页"并收起弹窗回到列表。
@@ -1555,10 +1578,28 @@ section{padding:clamp(56px,9vw,104px) 0}
       $$('iframe', mc).forEach(function(f){ try { f.src = 'about:blank'; } catch (e) {} });
     }
     modal.classList.remove('is-open');
-    modal.hidden = true;
-    document.body.classList.remove('is-locked');
-    if (lastFocused) { lastFocused.focus(); }
-    resumeBgmAfterVideo();
+    var onEnd = function(){
+      modal.removeEventListener('transitionend', onEnd);
+      if (!modal.classList.contains('is-open')) {
+        modal.hidden = true;
+        document.body.classList.remove('is-locked');
+        unlockScroll();
+        if (lastFocused) { lastFocused.focus(); }
+        resumeBgmAfterVideo();
+        resumeCoverVideos(); // 回到列表：恢复视口内封面视频的静音预览
+      }
+    };
+    modal.addEventListener('transitionend', onEnd);
+    setTimeout(function(){
+      if (!modal.classList.contains('is-open')) {
+        modal.hidden = true;
+        document.body.classList.remove('is-locked');
+        unlockScroll();
+        if (lastFocused) { lastFocused.focus(); }
+        resumeBgmAfterVideo();
+        resumeCoverVideos(); // 回到列表：恢复视口内封面视频的静音预览
+      }
+    }, 320);
   }
   // 用户主动关闭(X / 遮罩 / ESC)：若弹窗是经 pushState 进入历史栈的，
   // 走 history.back() 触发 popstate 同步 URL；否则直接关闭(避免误离开站点)。
@@ -1570,6 +1611,39 @@ section{padding:clamp(56px,9vw,104px) 0}
   function stepModal(delta){
     var next = (modalIndex + delta + PROJECTS.length) % PROJECTS.length;
     openModal(PROJECTS[next].id);
+  }
+
+  /* 滚动锁定（稳健方案：跨浏览器/滚动条类型一致，彻底避免弹窗关闭时背景位移频闪）
+     用 position:fixed 把 body 移出文档流，并用 top 偏移保持视觉位置不跳；
+     同时按真实滚动条宽度补偿 padding-right，经典滚动条(占宽)出现也不位移。 */
+  function lockScroll(){
+    if (typeof document.body._lockY === 'number') { return; }
+    var y = window.scrollY || window.pageYOffset || 0;
+    var sw = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.position = 'fixed';
+    document.body.style.top = '-' + y + 'px';
+    document.body.style.left = '0';
+    document.body.style.right = '0';
+    if (sw > 0) { document.body.style.paddingRight = sw + 'px'; }
+    document.body._lockY = y;
+  }
+  function unlockScroll(){
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.left = '';
+    document.body.style.right = '';
+    document.body.style.paddingRight = '';
+    if (typeof document.body._lockY === 'number') {
+      var y = document.body._lockY;
+      document.body._lockY = null;
+      // 即时回到锁定前位置，避免 scroll-behavior:smooth 导致关闭瞬间页面滑动
+      var de = document.documentElement;
+      var prev = de.style.scrollBehavior;
+      de.style.scrollBehavior = 'auto';
+      window.scrollTo(0, y);
+      if (window.requestAnimationFrame) { requestAnimationFrame(function(){ de.style.scrollBehavior = prev; }); }
+      else { de.style.scrollBehavior = prev; }
+    }
   }
 
   /* 背景音乐控制器（顶层，供视频模态暂停/恢复共享） */
@@ -1600,6 +1674,8 @@ section{padding:clamp(56px,9vw,104px) 0}
   /* 独立视频模态：Hero Showreel / 任意 data-vplay 触发 */
   function openVideoModal(m){
     if (!m || !m.src) { return; }
+    // 同 openModal：打开视频前同步停掉背景封面视频，杜绝背景出声
+    pauseAllCoverVideos();
     // 抖音没有可内嵌的播放器，直接在新标签页打开原片；看视频时本页 BGM 立即停
     if (mediaType(m.src) === 'douyin') {
       pauseBgmForVideo();
@@ -1611,18 +1687,22 @@ section{padding:clamp(56px,9vw,104px) 0}
     var wasVideoOpen = videoModal.classList.contains('is-open');
     var t = mediaType(m.src), stage = $('#videoStage'), cap = $('#videoCap'), inner = '';
     if (t === 'youtube') {
-      inner = '<iframe src="https://www.youtube.com/embed/' + ytId(m.src) + '?rel=0&modestbranding=1&autoplay=1" title="' + esc(m.caption || '视频') + '" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe>';
+      inner = '<iframe src="https://www.youtube.com/embed/' + ytId(m.src) + '?rel=0&modestbranding=1" title="' + esc(m.caption || '视频') + '" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe>';
     } else if (t === 'vimeo') {
-      inner = '<iframe src="https://player.vimeo.com/video/' + vimeoId(m.src) + '?autoplay=1" title="' + esc(m.caption || '视频') + '" allow="autoplay;fullscreen;picture-in-picture" allowfullscreen></iframe>';
+      inner = '<iframe src="https://player.vimeo.com/video/' + vimeoId(m.src) + '?title=0&byline=0&portrait=0" title="' + esc(m.caption || '视频') + '" allow="autoplay;fullscreen;picture-in-picture" allowfullscreen></iframe>';
     } else {
-      inner = '<video controls autoplay preload="auto"><source src="' + esc(m.src) + '" type="video/mp4">您的浏览器暂不支持视频播放。</video>';
+      // 关键：本地视频不自动播放、不自动出声；用户点原生播放控件后才带声播放，
+      // 避免手机端"打开即响"的突兀体验(autoplay 即使带手势也会立刻出声)。
+      inner = '<video controls preload="metadata"><source src="' + esc(m.src) + '" type="video/mp4">您的浏览器暂不支持视频播放。</video>';
     }
+    stopMediaIn(stage); // 切换到另一个视频前先停掉旧的，避免旧声音残留
     stage.innerHTML = inner;
     cap.textContent = m.caption || '';
     lastFocusedVideo = document.activeElement;
     videoModal.hidden = false;
     videoModal.classList.add('is-open');
     document.body.classList.add('is-locked');
+    lockScroll();
     $('#videoModalClose').focus();
     // 压入历史栈，支持手机滑动返回关闭视频弹窗(抖音分支已提前 return，不在此处)
     if (!wasVideoOpen) {
@@ -1632,7 +1712,8 @@ section{padding:clamp(56px,9vw,104px) 0}
   function closeVideoModal(){
     var stage = $('#videoStage');
     if (stage) {
-      // 停掉所有 <video> 并清空来源，确保声音立刻停止
+      // 内嵌 iframe 先置空，下一帧再清 DOM，避免 iframe 卸载瞬间造成主页闪烁
+      $$('iframe', stage).forEach(function(f){ try { f.src = 'about:blank'; } catch (e) {} });
       $$('video', stage).forEach(function(v){
         try {
           v.pause();
@@ -1641,16 +1722,36 @@ section{padding:clamp(56px,9vw,104px) 0}
           v.load();
         } catch (e) {}
       });
-      // 内嵌 iframe（YouTube / Vimeo 等）：先把 src 指向空白页，
-      // 避免仅移除节点时部分浏览器仍拖尾出声
-      $$('iframe', stage).forEach(function(f){ try { f.src = 'about:blank'; } catch (e) {} });
-      stage.innerHTML = '';   // 移除 iframe / 残留节点，彻底停止声音
+      if (window.requestAnimationFrame) {
+        requestAnimationFrame(function(){ stage.innerHTML = ''; });
+      } else { stage.innerHTML = ''; }
     }
     videoModal.classList.remove('is-open');
-    videoModal.hidden = true;
-    document.body.classList.remove('is-locked');
-    if (lastFocusedVideo) { try { lastFocusedVideo.focus(); } catch (e) {} }
-    resumeBgmAfterVideo();
+    // 等淡出过渡结束后：隐藏模态、恢复滚动条、恢复焦点/BGM。
+    // 关键是 is-locked 必须与模态同时消失，避免滚动条恢复和背景变化叠加造成频闪。
+    var onEnd = function(){
+      videoModal.removeEventListener('transitionend', onEnd);
+      if (!videoModal.classList.contains('is-open')) {
+        videoModal.hidden = true;
+        document.body.classList.remove('is-locked');
+        unlockScroll();
+        if (lastFocusedVideo) { try { lastFocusedVideo.focus(); } catch (e) {} }
+        resumeBgmAfterVideo();
+        resumeCoverVideos(); // 回到列表：恢复视口内封面视频的静音预览
+      }
+    };
+    videoModal.addEventListener('transitionend', onEnd);
+    // 兜底：过渡不支持/被跳过时同步完成收尾
+    setTimeout(function(){
+      if (!videoModal.classList.contains('is-open')) {
+        videoModal.hidden = true;
+        document.body.classList.remove('is-locked');
+        unlockScroll();
+        if (lastFocusedVideo) { try { lastFocusedVideo.focus(); } catch (e) {} }
+        resumeBgmAfterVideo();
+        resumeCoverVideos(); // 回到列表：恢复视口内封面视频的静音预览
+      }
+    }, 320);
   }
   function closeVideoModalUser(){
     if (history.state && history.state.modalOpen) { history.back(); }
@@ -1683,11 +1784,14 @@ section{padding:clamp(56px,9vw,104px) 0}
      ============================================================ */
   function initCoverVideos(){
     $$('.video-fill').forEach(function(v){
+      v.muted = true; // 防御：iOS 经 innerHTML 插入时 muted 特性偶尔不落为属性，显式置属性确保静音
       v.addEventListener('playing', function(){ v.classList.add('is-ready'); });
       v.addEventListener('error', function(){ v.classList.add('is-failed'); });
     });
     var play = function(v){
       if (reduceMotion || v.classList.contains('is-failed')) { return; }
+      // 每次播放前强制静音：防御 iOS 上 muted 被重置导致「未点播放却出声」
+      try { v.muted = true; v.playsInline = true; } catch (e) {}
       var pr = v.play();
       if (pr && pr.catch) { pr.catch(function(){}); }
     };
@@ -1710,6 +1814,55 @@ section{padding:clamp(56px,9vw,104px) 0}
       }, { threshold: 0.4 });
       $$('#featuredGrid .video-fill, #projectGrid .video-fill').forEach(function(v){ io.observe(v); });
     }
+  }
+
+  /* ============================================================
+     封面视频的全局暂停 / 恢复
+     手机端封面视频由 IntersectionObserver 自动播放，若只靠它异步回调，
+     打开弹窗 / 切换栏位时背景视频会「延迟泄漏」出声（display:none 触发的
+     isIntersecting=false 是异步的）。故所有会改变可见性的入口都同步暂停一次。
+     ============================================================ */
+  // 彻底停止某容器内的所有媒体：本地 video 先 pause 再清 src + load，
+  // iframe 置 about:blank。否则 innerHTML 直接替换后，脱离文档的媒体仍会继续出声。
+  function stopMediaIn(root){
+    if (!root) { return; }
+    $$('video', root).forEach(function(v){
+      try {
+        v.pause();
+        v.removeAttribute('src');
+        Array.prototype.forEach.call(v.querySelectorAll('source'), function(s){ s.removeAttribute('src'); });
+        v.load();
+      } catch (e) {}
+    });
+    $$('iframe', root).forEach(function(f){ try { f.src = 'about:blank'; } catch (e) {} });
+  }
+
+  function pauseAllCoverVideos(){
+    $$('.video-fill').forEach(function(v){
+      try {
+        if (!v.paused) { v.dataset.wasPlaying = '1'; v.pause(); }
+        v.muted = true; // 兜底静音，杜绝任何情况出声
+      } catch (e) {}
+    });
+  }
+  // 仅恢复「仍在可见视图内 + 之前确实在播」的封面视频
+  function resumeCoverVideos(){
+    if (reduceMotion) { return; }
+    $$('.video-fill').forEach(function(v){
+      try {
+        var wasPlaying = v.dataset.wasPlaying === '1';
+        delete v.dataset.wasPlaying;
+        if (!wasPlaying) { return; }
+        var card = v.closest('.card');
+        if (!card || card.offsetParent === null) { return; } // 被筛选隐藏 / 不在当前视图
+        var r = v.getBoundingClientRect();
+        if (r.top < window.innerHeight && r.bottom > 0) {
+          v.muted = true;
+          var pr = v.play();
+          if (pr && pr.catch) { pr.catch(function(){}); }
+        }
+      } catch (e) {}
+    });
   }
 
   /* ============================================================
