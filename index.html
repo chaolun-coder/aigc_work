@@ -580,6 +580,37 @@ section{padding:clamp(56px,9vw,104px) 0}
   .modal-media{position:relative;width:100%;aspect-ratio:21/9;background:#0c0f0d;overflow:hidden}
   .modal-media video,.modal-media iframe{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
   .modal-media .play-badge{left:auto;right:16px;bottom:16px}
+  /* 懒加载占位层：点击后才生成真正的 video / iframe */
+  .media-poster{
+    position:relative;display:block;width:100%;aspect-ratio:21/9;
+    border:0;padding:0;margin:0;background:#0c0f0d;cursor:pointer;overflow:hidden;
+    -webkit-tap-highlight-color:transparent;touch-action:manipulation;
+  }
+  .media-poster .poster-img,.media-poster>svg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+  .media-poster::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(8,6,18,0) 32%,rgba(8,6,18,.66));pointer-events:none}
+  .media-play{
+    position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2;
+    width:68px;height:68px;border-radius:50%;
+    background:rgba(12,15,13,.52);border:2px solid rgba(255,255,255,.88);
+    display:grid;place-items:center;
+    -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);
+    transition:transform .25s var(--ease),background .25s var(--ease);
+  }
+  .media-play::after{content:"";width:0;height:0;margin-left:5px;border-left:18px solid #fff;border-top:12px solid transparent;border-bottom:12px solid transparent}
+  .media-poster:hover .media-play,.media-poster:focus-visible .media-play{transform:translate(-50%,-50%) scale(1.07);background:rgba(12,15,13,.7)}
+  .media-poster:active .media-play{transform:translate(-50%,-50%) scale(.96)}
+  .media-hint{
+    position:absolute;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+    z-index:2;font-size:.82rem;letter-spacing:.05em;color:rgba(255,255,255,.94);
+    text-shadow:0 1px 8px rgba(0,0,0,.7);pointer-events:none;white-space:nowrap;
+  }
+  @media (max-width:560px){
+    .media-play{width:56px;height:56px}
+    .media-play::after{border-left-width:15px;border-top-width:10px;border-bottom-width:10px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .media-play{transition:none}
+  }
 
   /* 抖音视频：内嵌不可用时，用品牌化卡片引导到原片 */
   .douyin-watch{position:relative;display:block;width:100%;aspect-ratio:21/9;background:#0c0f0d;overflow:hidden;text-decoration:none;color:#fff}
@@ -1204,6 +1235,10 @@ section{padding:clamp(56px,9vw,104px) 0}
     catch (e) { return false; }
   };
   var reduceMotion = mq('(prefers-reduced-motion: reduce)');
+  // 夸克 / UC 等国产内核会在浏览器层面强制播放视频并解除静音，
+  // 网页侧设置的 muted 属性对它无效（微信 WebView / Safari 则正常遵守）。
+  // 检测到此类内核时，不做任何自动播放，一律改为静态封面 + 点击才加载。
+  var AGGRESSIVE_UA = /Quark|UCBrowser|UCWEB|UBrowser|UCAppleWebKernel/i.test(navigator.userAgent || '');
   var esc = function(s){
     return String(s).replace(/[&<>"']/g, function(c){
       return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
@@ -1238,31 +1273,99 @@ section{padding:clamp(56px,9vw,104px) 0}
     var media = (p.media && p.media.src) ? p.media : null;
     var html = coverSVG(p) + coverImgHTML(p);
     // 本地 mp4 才做封面自动播放；YouTube / Vimeo 保持静态封面 + 播放徽标
-    if (media && mediaType(media.src) === 'file') {
+    // 夸克 / UC 等内核会忽略 muted 强制带声播放，此类浏览器下不插入 video，
+    // 直接用静态封面，从源头杜绝首页出声
+    if (media && mediaType(media.src) === 'file' && !AGGRESSIVE_UA) {
       html += '<video class="video-fill" muted loop playsinline preload="metadata" tabindex="-1" aria-hidden="true">' +
               '<source src="' + esc(media.src) + '" type="video/mp4"></video>';
     }
     return html + (media ? cardBadge() : '');
   }
   // 弹窗里的整块视频
+  // 关键设计：本地 mp4 / YouTube / Vimeo 一律先渲染「静态占位层」，
+  // 此刻 DOM 中不存在任何 <video> / <iframe> 元素。
+  // 原因：夸克、UC 等国产内核会在浏览器层面强制播放并解除静音，
+  // 网页侧的 muted / autoplay 属性对它无效，JS 事后拦截也拦不住；
+  // 唯一可靠的做法是让可播放元素在用户真实点击前根本不存在（懒加载）。
   function modalMedia(p){
     var m = p.media; if (!m || !m.src) { return ''; }
     var t = mediaType(m.src), inner = '';
-    if (t === 'youtube') {
-      inner = '<iframe src="https://www.youtube.com/embed/' + ytId(m.src) + '?rel=0&modestbranding=1" title="' + esc(p.title) + ' 视频" loading="lazy" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe>';
-    } else if (t === 'vimeo') {
-      inner = '<iframe src="https://player.vimeo.com/video/' + vimeoId(m.src) + '?title=0&byline=0&portrait=0" title="' + esc(p.title) + ' 视频" loading="lazy" allow="autoplay;fullscreen;picture-in-picture" allowfullscreen></iframe>';
-    } else if (t === 'douyin') {
+    if (t === 'douyin') {
       // 抖音无公开内嵌播放器，用品牌化卡片引导到原片观看
       inner = '<a class="douyin-watch" href="' + esc(m.src) + '" target="_blank" rel="noopener noreferrer" aria-label="在抖音观看：' + esc(m.caption || p.title) + '">' +
                 '<span class="douyin-poster" aria-hidden="true">' + coverOrImg(p) + '</span>' +
                 '<span class="douyin-cta">' + douyinGlyph + '在抖音观看</span>' +
               '</a>';
     } else {
-      // playsinline：iOS 不强制全屏；不设 autoplay，用户点播放控件才出声
-      inner = '<video controls playsinline ' + ((m.poster || p.cover) ? 'poster="' + esc(m.poster || p.cover) + '" ' : '') + 'preload="metadata" aria-label="' + esc(p.title) + ' 视频"><source src="' + esc(m.src) + '" type="video/mp4">您的浏览器暂不支持视频播放。</video>';
+      // 占位层：只有封面图 + 播放按钮，没有任何媒体元素
+      var poster = m.poster || p.cover || '';
+      inner = '<button class="media-poster" type="button" data-play="1"' +
+                ' data-src="' + esc(m.src) + '" data-type="' + esc(t) + '"' +
+                (poster ? ' data-poster="' + esc(poster) + '"' : '') +
+                ' aria-label="播放视频：' + esc(p.title) + '">' +
+                (poster
+                  ? '<img class="poster-img" src="' + esc(poster) + '" alt="" loading="lazy" decoding="async" onerror="this.style.display=\'none\'">'
+                  : coverSVG(p)) +
+                '<span class="media-play" aria-hidden="true"></span>' +
+                '<span class="media-hint">点击播放视频</span>' +
+              '</button>';
     }
     return '<div class="modal-media">' + inner + '</div>' + (m.caption ? '<p class="modal-cap">' + esc(m.caption) + '</p>' : '');
+  }
+
+  // 用户点击占位层 → 此刻处于真实用户手势内，才创建媒体元素并播放（允许带声）
+  function activateModalMedia(btn){
+    if (!btn || btn.getAttribute('data-activated') === '1') { return; }
+    btn.setAttribute('data-activated', '1');
+    var src = btn.getAttribute('data-src') || '';
+    var t = btn.getAttribute('data-type') || mediaType(src);
+    if (!src) { return; }
+    var wrap = btn.parentNode, node = null;
+    var label = btn.getAttribute('aria-label') || '视频';
+
+    if (t === 'youtube') {
+      node = document.createElement('iframe');
+      node.src = 'https://www.youtube.com/embed/' + ytId(src) + '?rel=0&modestbranding=1&autoplay=1';
+      node.setAttribute('allow', 'accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture');
+      node.setAttribute('allowfullscreen', '');
+    } else if (t === 'vimeo') {
+      node = document.createElement('iframe');
+      node.src = 'https://player.vimeo.com/video/' + vimeoId(src) + '?title=0&byline=0&portrait=0&autoplay=1';
+      node.setAttribute('allow', 'autoplay;fullscreen;picture-in-picture');
+      node.setAttribute('allowfullscreen', '');
+    } else {
+      node = document.createElement('video');
+      var poster = btn.getAttribute('data-poster');
+      if (poster) { node.poster = poster; }
+      node.controls = true;
+      node.playsInline = true;
+      node.setAttribute('playsinline', '');
+      node.setAttribute('webkit-playsinline', '');
+      node.preload = 'auto';
+      var so = document.createElement('source');
+      so.src = src; so.type = 'video/mp4';
+      node.appendChild(so);
+    }
+    node.className = 'modal-media-node';
+    node.title = label;
+    if (wrap) { wrap.replaceChild(node, btn); }
+
+    pauseBgmForVideo(); // 用户已决定看视频 → BGM 让位
+    if (node.tagName === 'VIDEO') {
+      node.muted = false;
+      var pr = node.play();
+      if (pr && pr.catch) { pr.catch(function(){}); } // 被策略拒绝也无妨，原生控件可再点
+    }
+  }
+  // 占位层点击委托（只绑定一次）
+  function bindMediaPoster(){
+    if (modal._posterBound) { return; }
+    modal._posterBound = true;
+    modal.addEventListener('click', function(e){
+      var el = e.target;
+      var btn = (el && el.closest) ? el.closest('.media-poster') : null;
+      if (btn) { activateModalMedia(btn); }
+    });
   }
 
   /* ============================================================
@@ -1511,21 +1614,12 @@ section{padding:clamp(56px,9vw,104px) 0}
     // 切换作品(上一个/下一个)时必须先停掉旧媒体，否则旧视频声音会残留在后台
     stopMediaIn($('#modalCover'));
     $('#modalCover').innerHTML = hasMedia ? modalMedia(p) : coverOrImg(p);
-    if (hasMedia && mediaType(p.media.src) === 'file') {
-      var v = $('#modalCover').querySelector('video');
-      if (v) {
-        v.addEventListener('error', function(){
-          $('#modalCover').innerHTML = coverSVG(p) +
-            '<span class="media-fallback" style="background:linear-gradient(135deg,' + p.c1 + ',' + p.c2 + ')"><span>视频即将上线</span></span>';
-        });
-      }
-    }
-    // 视频型项目：打开详情即让 BGM 让位，保证「进去就是安静的」；
-    // 本地视频再套一层静音保护：只有用户在弹窗内真实交互过才允许出声，
-    // 彻底杜绝真机上「还没点播放，声音已经响了」
+    // 视频型项目：打开详情即让 BGM 让位，保证「进去就是安静的」。
+    // 此时弹窗里只有静态占位层（无 video / iframe），
+    // 浏览器没有任何媒体可以自动播放，因此不存在「进去就响」的可能。
     if (hasMedia) {
       pauseBgmForVideo();
-      guardVideoAutoplay($('#modalCover').querySelector('video'), modal);
+      bindMediaPoster();
     }
     $('#modalBody').innerHTML = '' +
       '<p class="eyebrow">' + esc(p.tags.join(' / ')) + '</p>' +
@@ -1776,7 +1870,15 @@ section{padding:clamp(56px,9vw,104px) 0}
   function initCoverVideos(){
     $$('.video-fill').forEach(function(v){
       v.muted = true; // 防御：iOS 经 innerHTML 插入时 muted 特性偶尔不落为属性，显式置属性确保静音
-      v.addEventListener('playing', function(){ v.classList.add('is-ready'); });
+      v.addEventListener('playing', function(){
+        v.classList.add('is-ready');
+        // 运行时校验：部分内核(夸克/UC)会在播放后把 muted 悄悄改回 false，
+        // 一旦发现静音失效就立刻停掉，宁可没有预览也不允许背景出声
+        if (v.muted !== true) {
+          try { v.muted = true; v.pause(); } catch (e) {}
+          if (v.muted !== true) { try { v.removeAttribute('src'); v.load(); } catch (e) {} }
+        }
+      });
       v.addEventListener('error', function(){ v.classList.add('is-failed'); });
     });
     var play = function(v){
