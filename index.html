@@ -1520,17 +1520,12 @@ section{padding:clamp(56px,9vw,104px) 0}
         });
       }
     }
-    // 视频型项目：让 BGM 给视频让位
-    // - YouTube / Vimeo 内嵌 iframe 无法监听播放事件，故打开即暂停 BGM
-    // - 本地 mp4 在用户真正点「播放」时再暂停 BGM（绑定 play 事件）
+    // 视频型项目：打开详情即让 BGM 让位，保证「进去就是安静的」；
+    // 本地视频再套一层静音保护：只有用户在弹窗内真实交互过才允许出声，
+    // 彻底杜绝真机上「还没点播放，声音已经响了」
     if (hasMedia) {
-      var mt = mediaType(p.media.src);
-      if (mt === 'youtube' || mt === 'vimeo') {
-        pauseBgmForVideo();
-      } else {
-        var mvEl = $('#modalCover').querySelector('video');
-        if (mvEl) { mvEl.addEventListener('play', function(){ pauseBgmForVideo(); }); }
-      }
+      pauseBgmForVideo();
+      guardVideoAutoplay($('#modalCover').querySelector('video'), modal);
     }
     $('#modalBody').innerHTML = '' +
       '<p class="eyebrow">' + esc(p.tags.join(' / ')) + '</p>' +
@@ -1567,15 +1562,10 @@ section{padding:clamp(56px,9vw,104px) 0}
     // 停掉弹窗内的视频，避免关闭后仍在后台出声
     var mc = $('#modalCover');
     if (mc) {
-      $$('video', mc).forEach(function(v){
-        try {
-          v.pause();
-          v.removeAttribute('src');
-          Array.prototype.forEach.call(v.querySelectorAll('source'), function(s){ s.removeAttribute('src'); });
-          v.load();
-        } catch (e) {}
-      });
-      $$('iframe', mc).forEach(function(f){ try { f.src = 'about:blank'; } catch (e) {} });
+      stopMediaIn(mc);
+      // 彻底移除媒体节点：iOS 上仅 pause + 清 src 偶尔仍会拖尾出声，
+      // 直接清空 DOM 最保险（下次 openModal 会重新渲染）
+      try { mc.innerHTML = ''; } catch (e) {}
     }
     modal.classList.remove('is-open');
     var onEnd = function(){
@@ -1697,6 +1687,7 @@ section{padding:clamp(56px,9vw,104px) 0}
     }
     stopMediaIn(stage); // 切换到另一个视频前先停掉旧的，避免旧声音残留
     stage.innerHTML = inner;
+    guardVideoAutoplay(stage.querySelector('video'), videoModal);
     cap.textContent = m.caption || '';
     lastFocusedVideo = document.activeElement;
     videoModal.hidden = false;
@@ -1792,6 +1783,8 @@ section{padding:clamp(56px,9vw,104px) 0}
       if (reduceMotion || v.classList.contains('is-failed')) { return; }
       // 每次播放前强制静音：防御 iOS 上 muted 被重置导致「未点播放却出声」
       try { v.muted = true; v.playsInline = true; } catch (e) {}
+      // 硬闸：静音兜底失败就干脆不播——宁可没有预览，也绝不允许背景出声
+      if (v.muted !== true) { return; }
       var pr = v.play();
       if (pr && pr.catch) { pr.catch(function(){}); }
     };
@@ -1837,6 +1830,33 @@ section{padding:clamp(56px,9vw,104px) 0}
     $$('iframe', root).forEach(function(f){ try { f.src = 'about:blank'; } catch (e) {} });
   }
 
+  // 防「打开即响」硬保护：弹窗内视频默认静音，
+  // 仅当用户在容器内真实交互过(点击/触摸)才允许出声；
+  // 未被交互触发的播放一律视为自动播放 → 保持静音并立即暂停。
+  // （真机 iOS/安卓 与桌面 headless 行为不同，不能用「没有 autoplay 就不会播」来假设）
+  function guardVideoAutoplay(v, container){
+    if (!v || !container) { return; }
+    if (!container._guardBound) {
+      container._guardBound = true;
+      var mark = function(){ container._userInteracted = true; };
+      container.addEventListener('pointerdown', mark, true);
+      container.addEventListener('touchstart', mark, true);
+      container.addEventListener('click', mark, true);
+    }
+    container._userInteracted = false;
+    v.muted = true;
+    try { v.pause(); } catch (e) {}
+    v.addEventListener('play', function(){
+      if (!container._userInteracted) {
+        v.muted = true;
+        try { v.pause(); } catch (e) {}
+        return;
+      }
+      v.muted = false;      // 用户主动播放 → 给声音
+      pauseBgmForVideo();
+    });
+  }
+
   function pauseAllCoverVideos(){
     $$('.video-fill').forEach(function(v){
       try {
@@ -1857,7 +1877,9 @@ section{padding:clamp(56px,9vw,104px) 0}
         if (!card || card.offsetParent === null) { return; } // 被筛选隐藏 / 不在当前视图
         var r = v.getBoundingClientRect();
         if (r.top < window.innerHeight && r.bottom > 0) {
-          v.muted = true;
+          try { v.muted = true; v.playsInline = true; } catch (e) {}
+          // 硬闸：静音兜底失败就不恢复，避免「返回上一页后声音又冒出来」
+          if (v.muted !== true) { return; }
           var pr = v.play();
           if (pr && pr.catch) { pr.catch(function(){}); }
         }
