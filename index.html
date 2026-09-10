@@ -1391,7 +1391,8 @@ section{padding:clamp(56px,9vw,104px) 0}
   var currentRoute = 'home';
 
   function applyRoute(route, isInit){
-    // 路由切换时，若有视频模态在播放，先关闭它（停止视频声音）
+    // 路由切换时，若有弹窗在显示，先关闭它（停止声音、回到列表视图）
+    if (modal && modal.classList.contains('is-open')) { closeModal(); }
     if (videoModal && videoModal.classList.contains('is-open')) { closeVideoModal(); }
     currentRoute = route;
     $$('.view').forEach(function(v){ v.classList.toggle('is-active', v.id === 'view-' + route); });
@@ -1476,6 +1477,7 @@ section{padding:clamp(56px,9vw,104px) 0}
     for (var i = 0; i < PROJECTS.length; i++) { if (PROJECTS[i].id === id) { idx = i; break; } }
     if (idx < 0) { return; }
     modalIndex = idx;
+    var wasOpen = modal.classList.contains('is-open'); // 记录进入前是否已在打开(用于 stepModal 不重复压栈)
     var p = PROJECTS[idx];
 
     var hasMedia = !!(p.media && p.media.src);
@@ -1525,6 +1527,11 @@ section{padding:clamp(56px,9vw,104px) 0}
     modal.classList.add('is-open');
     document.body.classList.add('is-locked');
     $('#modalClose').focus();
+    // 把详情压入浏览器历史栈：移动端(iOS/安卓)的左滑/右滑返回手势依赖
+    // 历史记录，压栈后滑动手势才能识别到"上一页"并收起弹窗回到列表。
+    if (!wasOpen) {
+      try { history.pushState({ modalOpen: true, type: 'project', id: id }, '', location.href); } catch (e) {}
+    }
   }
 
   function closeModal(){
@@ -1546,6 +1553,12 @@ section{padding:clamp(56px,9vw,104px) 0}
     document.body.classList.remove('is-locked');
     if (lastFocused) { lastFocused.focus(); }
     resumeBgmAfterVideo();
+  }
+  // 用户主动关闭(X / 遮罩 / ESC)：若弹窗是经 pushState 进入历史栈的，
+  // 走 history.back() 触发 popstate 同步 URL；否则直接关闭(避免误离开站点)。
+  function closeModalUser(){
+    if (history.state && history.state.modalOpen) { history.back(); }
+    else { closeModal(); }
   }
 
   function stepModal(delta){
@@ -1589,6 +1602,7 @@ section{padding:clamp(56px,9vw,104px) 0}
       return;
     }
     pauseBgmForVideo();
+    var wasVideoOpen = videoModal.classList.contains('is-open');
     var t = mediaType(m.src), stage = $('#videoStage'), cap = $('#videoCap'), inner = '';
     if (t === 'youtube') {
       inner = '<iframe src="https://www.youtube.com/embed/' + ytId(m.src) + '?rel=0&modestbranding=1&autoplay=1" title="' + esc(m.caption || '视频') + '" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe>';
@@ -1604,6 +1618,10 @@ section{padding:clamp(56px,9vw,104px) 0}
     videoModal.classList.add('is-open');
     document.body.classList.add('is-locked');
     $('#videoModalClose').focus();
+    // 压入历史栈，支持手机滑动返回关闭视频弹窗(抖音分支已提前 return，不在此处)
+    if (!wasVideoOpen) {
+      try { history.pushState({ modalOpen: true, type: 'video' }, '', location.href); } catch (e) {}
+    }
   }
   function closeVideoModal(){
     var stage = $('#videoStage');
@@ -1627,6 +1645,10 @@ section{padding:clamp(56px,9vw,104px) 0}
     document.body.classList.remove('is-locked');
     if (lastFocusedVideo) { try { lastFocusedVideo.focus(); } catch (e) {} }
     resumeBgmAfterVideo();
+  }
+  function closeVideoModalUser(){
+    if (history.state && history.state.modalOpen) { history.back(); }
+    else { closeVideoModal(); }
   }
 
   /* ============================================================
@@ -1696,10 +1718,10 @@ section{padding:clamp(56px,9vw,104px) 0}
       if (card) { openModal(card.getAttribute('data-id')); return; }
       if (t.closest('#filters')) { onFilter(e); return; }
       if (t.closest('#videoModal')) {
-        if (t.closest('[data-close]')) { closeVideoModal(); }
+        if (t.closest('[data-close]')) { closeVideoModalUser(); }
         return;
       }
-      if (t.closest('[data-close]') || t.closest('#modalClose')) { closeModal(); return; }
+      if (t.closest('[data-close]') || t.closest('#modalClose')) { closeModalUser(); return; }
       if (t.closest('[data-vplay]')) { openVideoModal(SHOWREEL); return; }
       if (t.closest('.douyin-watch')) {
         pauseBgmForVideo();
@@ -1765,19 +1787,26 @@ section{padding:clamp(56px,9vw,104px) 0}
 
     document.addEventListener('keydown', function(e){
       if (videoModal.classList.contains('is-open')) {
-        if (e.key === 'Escape') { closeVideoModal(); }
+        if (e.key === 'Escape') { closeVideoModalUser(); }
         else { trapTab(e, videoModal); }
         return;
       }
       if (!modal.classList.contains('is-open')) { return; }
-      if (e.key === 'Escape') { closeModal(); }
+      if (e.key === 'Escape') { closeModalUser(); }
       if (e.key === 'ArrowLeft') { stepModal(-1); }
       if (e.key === 'ArrowRight') { stepModal(1); }
       trapTab(e, modal);
     });
 
-    // 路由
+    // 路由：hash 变化(导航栏 / 内链)时切换视图
     window.addEventListener('hashchange', function(){ applyRoute(routeFromHash(), false); });
+    // 浏览器前进/后退(含手机左滑/右滑返回手势)：弹窗开着则收起它，
+    // 否则按 hash 同步路由。让移动端滑动手势正确关闭详情/视频弹窗。
+    window.addEventListener('popstate', function(){
+      if (modal.classList.contains('is-open')) { closeModal(); return; }
+      if (videoModal.classList.contains('is-open')) { closeVideoModal(); return; }
+      applyRoute(routeFromHash(), false);
+    });
   }
 
   /* ============================================================
