@@ -604,6 +604,26 @@ section{padding:clamp(56px,9vw,104px) 0}
     z-index:2;font-size:.82rem;letter-spacing:.05em;color:rgba(255,255,255,.94);
     text-shadow:0 1px 8px rgba(0,0,0,.7);pointer-events:none;white-space:nowrap;
   }
+  .unmute-btn{
+    position:absolute;top:16px;right:16px;z-index:4;
+    display:flex;align-items:center;gap:7px;
+    padding:9px 14px;border-radius:999px;border:0;
+    background:rgba(12,15,13,.76);color:#fff;
+    font-size:.8rem;letter-spacing:.02em;line-height:1;
+    -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
+    cursor:pointer;touch-action:manipulation;
+    -webkit-tap-highlight-color:transparent;
+    box-shadow:0 4px 14px rgba(0,0,0,.25);
+  }
+  .unmute-btn:active{transform:scale(.96)}
+  .unmute-icon{font-size:1.05rem}
+  @media (max-width:560px){
+    .unmute-btn{top:12px;right:12px;padding:8px 12px;font-size:.75rem}
+    .unmute-icon{font-size:.95rem}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .unmute-btn{transition:none}
+  }
   @media (max-width:560px){
     .media-play{width:56px;height:56px}
     .media-play::after{border-left-width:15px;border-top-width:10px;border-bottom-width:10px}
@@ -1238,7 +1258,7 @@ section{padding:clamp(56px,9vw,104px) 0}
   // 夸克 / UC 等国产内核会在浏览器层面强制播放视频并解除静音，
   // 网页侧设置的 muted 属性对它无效（微信 WebView / Safari 则正常遵守）。
   // 检测到此类内核时，不做任何自动播放，一律改为静态封面 + 点击才加载。
-  var AGGRESSIVE_UA = /Quark|UCBrowser|UCWEB|UBrowser|UCAppleWebKernel/i.test(navigator.userAgent || '');
+  var AGGRESSIVE_UA = /Quark|UCBrowser|UCWEB|UBrowser|UCAppleWebKernel|XiaoMi|MiuiBrowser|MiAI|MiBrowser|Xiaomi|MIUI|HyperOS|HeyTapBrowser|OppoBrowser|VivoBrowser|baidubrowser|Baidu/i.test(navigator.userAgent || '');
   var esc = function(s){
     return String(s).replace(/[&<>"']/g, function(c){
       return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
@@ -1313,7 +1333,7 @@ section{padding:clamp(56px,9vw,104px) 0}
     return '<div class="modal-media">' + inner + '</div>' + (m.caption ? '<p class="modal-cap">' + esc(m.caption) + '</p>' : '');
   }
 
-  // 用户点击占位层 → 此刻处于真实用户手势内，才创建媒体元素并播放（允许带声）
+  // 用户点击占位层 → 此刻处于真实用户手势内，才创建媒体元素并播放
   function activateModalMedia(btn){
     if (!btn || btn.getAttribute('data-activated') === '1') { return; }
     btn.setAttribute('data-activated', '1');
@@ -1352,11 +1372,52 @@ section{padding:clamp(56px,9vw,104px) 0}
 
     pauseBgmForVideo(); // 用户已决定看视频 → BGM 让位
     if (node.tagName === 'VIDEO') {
+      // 用户手势内直接尝试带声播放；国产内核（小米/夸克/UC）常会在 play() 后
+      // 把 muted 悄悄改回 true，因此在 playing 事件里再尝试一次解除静音。
       node.muted = false;
+      node.defaultMuted = false;
       var pr = node.play();
-      if (pr && pr.catch) { pr.catch(function(){}); } // 被策略拒绝也无妨，原生控件可再点
+      if (pr && pr.catch) { pr.catch(function(){}); }
+      // 部分国产内核（小米/夸克/UC）会在 play() 后把 muted 悄悄改回 true。
+      // 用 playing + volumechange 双保险：一旦检测到被静音，立即尝试解除；
+      // 若解除失败，给出显式「开启声音」按钮，避免用户找不到音量开关。
+      var tryUnmute = function(){
+        if (!node.muted) { return true; }
+        node.muted = false;
+        var pr2 = node.play();
+        if (pr2 && pr2.catch) { pr2.catch(function(){}); }
+        if (node.muted) { showUnmuteButton(node); }
+        return !node.muted;
+      };
+      node.addEventListener('playing', function onPlaying(){
+        node.removeEventListener('playing', onPlaying);
+        tryUnmute();
+      });
+      node.addEventListener('volumechange', function onVolumeChange(){
+        if (tryUnmute()) { node.removeEventListener('volumechange', onVolumeChange); }
+      });
     }
   }
+  // 为被国产内核强制静音的视频显示「开启声音」按钮
+  function showUnmuteButton(video){
+    if (!video || !video.parentNode) { return; }
+    var wrap = video.parentNode;
+    if (wrap.querySelector('.unmute-btn')) { return; }
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'unmute-btn';
+    btn.setAttribute('aria-label', '开启声音');
+    btn.innerHTML = '<span class="unmute-icon" aria-hidden="true">🔊</span><span>开启声音</span>';
+    btn.addEventListener('click', function(e){
+      e.stopPropagation();
+      video.muted = false;
+      var pr = video.play();
+      if (pr && pr.catch) { pr.catch(function(){}); }
+      btn.remove();
+    });
+    wrap.appendChild(btn);
+  }
+
   // 占位层点击委托（只绑定一次）
   function bindMediaPoster(){
     if (modal._posterBound) { return; }
